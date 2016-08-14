@@ -13,25 +13,25 @@ public class NodeController : MonoBehaviour
 
     private int _nodeID = 0;
     private UnityEngine.EventSystems.EventSystem eventSystem;
-    //private UnityEngine.UI.Text debugText;
+    private UnityEngine.UI.Text debugText;
     private UnityEngine.UI.Image imageUIComponent;
     private Color nodeDefaultBackgroundColor;
     private bool _nodeTextMouseOver = false;
     private bool _nodeMouseOver = false;
     private bool _nodeClicked = false;
-    private PointerState lastPointerState = PointerState.Off;
+    private NodePointerState lastPointerState = NodePointerState.Unvalid;
     //private PointerLocation lastPointerLocation = PointerLocation.OffBorder;
     private RectTransform _rectTransform = null;
     private Camera nodesCamera;
     private UnityEngine.UI.InputField inputField;
     private RectTransform inputFieldRectTransform;
     private Vector3 resizingMovingLastMousePosition;
-    private PointerState resizeStartPointerState;
+    private NodePointerState resizeStartPointerState;
     private Canvas parentCanvas;
     private float lastCanvasScaleFactor;
     private float lastLeftClickTime = Mathf.NegativeInfinity;
-    private Dictionary<int, NodeController> _toNodes = null;
-    private Dictionary<int, NodeController> _fromNodes = null;
+    private List<EdgeController> _inwardEdges = null;
+    private List<EdgeController> _outwardEdges = null;
     private bool ignoreNextPotentialAddEdgeClick = false;
 
     public int nodeID
@@ -83,15 +83,29 @@ public class NodeController : MonoBehaviour
                 if (value)
                 {
                     if (connectMode && connectModeFromNode != this && connectModeFromNode != null)
-                        potentialConnectModeToNode = this;
+                    {
+                        bool alreadyConnected = false;
+
+                        foreach (EdgeController edge in connectModeFromNode.outwardEdges)
+                        {
+                            if(edge.toNode == this)
+                            {
+                                alreadyConnected = true;
+                                break;
+                            }
+                        }
+
+                        if(!alreadyConnected)
+                            potentialConnectModeToNode = this;
+                    }
                 }
                 else
                 {
                     if (connectMode && potentialConnectModeToNode == this)
                         potentialConnectModeToNode = null;
 
-                    if (!connectMode)
-                        ignoreNextPotentialAddEdgeClick = false;
+                    //if (!connectMode)
+                    //    ignoreNextPotentialAddEdgeClick = false;
                 }
             }
         }
@@ -114,15 +128,15 @@ public class NodeController : MonoBehaviour
                     {
                         switch (pointerState)
                         {
-                            case PointerState.Move:
+                            case NodePointerState.Move:
                                 resizeMoveMode = ResizeMoveMode.Moving;
                                 resizingMovingNode = this;
                                 resizingMovingLastMousePosition = Input.mousePosition;
 
-                                rectTransform.SetAsLastSibling();
+                                MakeTopMost();
                                 break;
-                            case PointerState.Off:
-                            case PointerState.Unvalid:
+                            case NodePointerState.Off:
+                            case NodePointerState.Unvalid:
                                 break;
                             default:
                                 resizeMoveMode = ResizeMoveMode.Resizing;
@@ -130,46 +144,52 @@ public class NodeController : MonoBehaviour
                                 resizingMovingLastMousePosition = Input.mousePosition;
                                 resizeStartPointerState = pointerState;
 
-                                rectTransform.SetAsLastSibling();
+                                MakeTopMost();
                                 break;
                         }
                     }
                     else
                     {
                         resizeMoveMode = ResizeMoveMode.No;
-                        lastPointerState = PointerState.Unvalid;
+                        UnvalidateLastPointerState();
                     }
                 }
                 else
                 {
                     if (potentialConnectModeToNode == this)
                     {
-                        NodesParentController.instance.CancelEdge();
+                        NodesParentController.instance.ConfirmEdge();
                         ignoreNextPotentialAddEdgeClick = true;
+
+                        StopCoroutine(IgnoreNextPotentialAddEdgeClickClear());
+                        StartCoroutine(IgnoreNextPotentialAddEdgeClickClear());
                     }
                     else
                     {
                         NodesParentController.instance.CancelEdge();
                         ignoreNextPotentialAddEdgeClick = true;
+
+                        StopCoroutine(IgnoreNextPotentialAddEdgeClickClear());
+                        StartCoroutine(IgnoreNextPotentialAddEdgeClickClear());
                     }
                 }
             }
         }
     }
-    public enum PointerLocation { OnBorder, OffBorder }
-    public enum PointerState { Off = -1, TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left, Move, Unvalid}
+    public enum NodePointerLocation { OnBorder, OffBorder }
+    public enum NodePointerState { Off = -1, TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left, Move, Unvalid }
     public enum ResizeMoveMode { No, Moving, Resizing }
-    public PointerLocation pointerLocation
+    public NodePointerLocation pointerLocation
     {
         get
         {
             if (nodeMouseOver && !nodeTextMouseOver)
-                return PointerLocation.OnBorder;
+                return NodePointerLocation.OnBorder;
             else
-                return PointerLocation.OffBorder;
+                return NodePointerLocation.OffBorder;
         }
     }
-    public PointerState pointerState
+    public NodePointerState pointerState
     {
         get
         {
@@ -177,14 +197,14 @@ public class NodeController : MonoBehaviour
             float cornerThreshold = borderWidth / parentCanvas.scaleFactor;
             float edgeThreshold = borderWidth / parentCanvas.scaleFactor;
 
-            if ((pointerLocation == PointerLocation.OnBorder || nodeTextMouseOver) && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
-                return PointerState.Move;
+            if ((pointerLocation == NodePointerLocation.OnBorder || nodeTextMouseOver) && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
+                return NodePointerState.Move;
 
-            if (pointerLocation == PointerLocation.OffBorder)
-                return PointerState.Off;
+            if (pointerLocation == NodePointerLocation.OffBorder)
+                return NodePointerState.Off;
 
             if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, Input.mousePosition, nodesCamera, out localCursor))
-                return PointerState.Off;
+                return NodePointerState.Off;
 
             Vector2 topLeftCorner = rectTransform.sizeDelta / 2.0F;
             topLeftCorner.x = -topLeftCorner.x;
@@ -196,23 +216,23 @@ public class NodeController : MonoBehaviour
             bottomRightCorner.y = -bottomRightCorner.y;
 
             if ((localCursor - topLeftCorner).magnitude <= cornerThreshold)
-                return PointerState.TopLeft;
+                return NodePointerState.TopLeft;
             else if ((localCursor - topRightCorner).magnitude <= cornerThreshold)
-                return PointerState.TopRight;
+                return NodePointerState.TopRight;
             else if ((localCursor - bottomLeftCorner).magnitude <= cornerThreshold)
-                return PointerState.BottomLeft;
+                return NodePointerState.BottomLeft;
             else if ((localCursor - bottomRightCorner).magnitude <= cornerThreshold)
-                return PointerState.BottomRight;
+                return NodePointerState.BottomRight;
             else if (Mathf.Abs(localCursor.x - topRightCorner.x) <= edgeThreshold)
-                return PointerState.Right;
+                return NodePointerState.Right;
             else if (Mathf.Abs(localCursor.x - topLeftCorner.x) <= edgeThreshold)
-                return PointerState.Left;
+                return NodePointerState.Left;
             else if (Mathf.Abs(localCursor.y - topRightCorner.y) <= edgeThreshold)
-                return PointerState.Top;
+                return NodePointerState.Top;
             else if (Mathf.Abs(localCursor.y - bottomRightCorner.y) <= edgeThreshold)
-                return PointerState.Bottom;
+                return NodePointerState.Bottom;
 
-            return PointerState.Off;
+            return NodePointerState.Off;
         }
     }
     public Color backgroundSelectedColor;
@@ -228,24 +248,24 @@ public class NodeController : MonoBehaviour
             inputField.text = value;
         }
     }
-    public Dictionary<int, NodeController> toNodes
+    public List<EdgeController> inwardEdges
     {
         get
         {
-            if (_toNodes == null)
-                _toNodes = new Dictionary<int, NodeController>();
+            if (_inwardEdges == null)
+                _inwardEdges = new List<EdgeController>();
 
-            return _toNodes;
+            return _inwardEdges;
         }
     }
-    public Dictionary<int, NodeController> fromNodes
+    public List<EdgeController> outwardEdges
     {
         get
         {
-            if (_fromNodes == null)
-                _fromNodes = new Dictionary<int, NodeController>();
+            if (_outwardEdges == null)
+                _outwardEdges = new List<EdgeController>();
 
-            return _fromNodes;
+            return _outwardEdges;
         }
     }
     public RectTransform rectTransform
@@ -259,6 +279,39 @@ public class NodeController : MonoBehaviour
         }
     }
 
+    IEnumerator IgnoreNextPotentialAddEdgeClickClear()
+    {
+        yield return new WaitForSecondsRealtime(0.1F);
+        //yield return new WaitForEndOfFrame();
+
+        ignoreNextPotentialAddEdgeClick = false;
+    }
+
+    void MakeTopMost()
+    {
+        rectTransform.SetAsLastSibling();
+
+        foreach (EdgeController edge in outwardEdges)
+            edge.rectTransform.SetAsLastSibling();
+
+        foreach (EdgeController edge in inwardEdges)
+            edge.rectTransform.SetAsLastSibling();
+    }
+
+    public void UnvalidateLastPointerState(bool unvalidateConnectedEdges = true)
+    {
+        lastPointerState = NodePointerState.Unvalid;
+
+        if (unvalidateConnectedEdges)
+        {
+            foreach (EdgeController edge in outwardEdges)
+                edge.UnvalidateLastPointerState(false);
+
+            foreach (EdgeController edge in inwardEdges)
+                edge.UnvalidateLastPointerState(false);
+        }
+    }
+
     void Awake()
     {
         eventSystem = UnityEngine.EventSystems.EventSystem.current;
@@ -268,7 +321,7 @@ public class NodeController : MonoBehaviour
         nodesCamera = Camera.main;
         imageUIComponent = GetComponent<UnityEngine.UI.Image>();
         nodeDefaultBackgroundColor = imageUIComponent.color;
-        //debugText = GameObject.Find("debug").GetComponent<UnityEngine.UI.Text>();
+        debugText = GameObject.Find("debug").GetComponent<UnityEngine.UI.Text>();
     }
 
     void Start()
@@ -282,6 +335,10 @@ public class NodeController : MonoBehaviour
 
     void Update()
     {
+        //debugText.text = "connectMode: " + connectMode.ToString() + "    resizingMovingMode: " + resizeMoveMode.ToString();
+
+        //print(nodeID + ": pointerState: " + pointerState.ToString());
+        //print("nodeMouseOver: " + nodeMouseOver.ToString() + " nodeTextMouseOver: " + nodeTextMouseOver.ToString());
         //if (clearIgnoreFlag)
         //{
         //    ignoreNextPotentialAddEdgeClick = false;
@@ -319,50 +376,50 @@ public class NodeController : MonoBehaviour
         }
 
         if (lastPointerState != pointerState)
-        { 
-            if (resizeMoveMode == ResizeMoveMode.No && !connectMode)
+        {
+            if ((resizeMoveMode == ResizeMoveMode.No && !connectMode))
             {
                 switch (pointerState)
                 {
-                    case PointerState.Move:
+                    case NodePointerState.Move:
                         CursorController.instance.SetCursor(CursorController.CursorType.Move);
                         break;
-                    case PointerState.TopLeft:
+                    case NodePointerState.TopLeft:
                         CursorController.instance.SetCursor(CursorController.CursorType.ResizeBackslash);
                         break;
-                    case PointerState.Top:
+                    case NodePointerState.Top:
                         CursorController.instance.SetCursor(CursorController.CursorType.ResizeVertical);
                         break;
-                    case PointerState.TopRight:
+                    case NodePointerState.TopRight:
                         CursorController.instance.SetCursor(CursorController.CursorType.ResizeSlash);
                         break;
-                    case PointerState.Right:
+                    case NodePointerState.Right:
                         CursorController.instance.SetCursor(CursorController.CursorType.ResizeHorizontal);
                         break;
-                    case PointerState.BottomRight:
+                    case NodePointerState.BottomRight:
                         CursorController.instance.SetCursor(CursorController.CursorType.ResizeBackslash);
                         break;
-                    case PointerState.Bottom:
+                    case NodePointerState.Bottom:
                         CursorController.instance.SetCursor(CursorController.CursorType.ResizeVertical);
                         break;
-                    case PointerState.BottomLeft:
+                    case NodePointerState.BottomLeft:
                         CursorController.instance.SetCursor(CursorController.CursorType.ResizeSlash);
                         break;
-                    case PointerState.Left:
+                    case NodePointerState.Left:
                         CursorController.instance.SetCursor(CursorController.CursorType.ResizeHorizontal);
                         break;
-                    case PointerState.Off:
+                    case NodePointerState.Off:
                         CursorController.instance.ResetCursor();
                         break;
                 }
 
                 switch (pointerState)
                 {
-                    case PointerState.Off:
+                    case NodePointerState.Off:
                         imageUIComponent.color = nodeDefaultBackgroundColor;
                         break;
-                    case PointerState.Move:
-                        if(pointerLocation == PointerLocation.OnBorder)
+                    case NodePointerState.Move:
+                        if (pointerLocation == NodePointerLocation.OnBorder)
                             imageUIComponent.color = backgroundSelectedColor;
                         else
                             imageUIComponent.color = nodeDefaultBackgroundColor;
@@ -388,7 +445,7 @@ public class NodeController : MonoBehaviour
 
         //debugText.text = (resizeMoveMode == ResizeMoveMode.Moving && resizingMovingNode == this).ToString();
 
-        if(connectMode && (connectModeFromNode == this || potentialConnectModeToNode == this))
+        if (connectMode && (connectModeFromNode == this || potentialConnectModeToNode == this))
         {
             inputField.interactable = false;
 
@@ -397,11 +454,11 @@ public class NodeController : MonoBehaviour
 
             imageUIComponent.color = backgroundMovingColor;
         }
-        else if(resizeMoveMode == ResizeMoveMode.Moving && resizingMovingNode == this)
+        else if (resizeMoveMode == ResizeMoveMode.Moving && resizingMovingNode == this)
         {
             inputField.interactable = false;
 
-            if(eventSystem.currentSelectedGameObject)
+            if (eventSystem.currentSelectedGameObject)
                 eventSystem.SetSelectedGameObject(null);
 
             imageUIComponent.color = backgroundMovingColor;
@@ -416,6 +473,8 @@ public class NodeController : MonoBehaviour
 
                 resizingMovingLastMousePosition = Input.mousePosition;
             }
+
+            UpdateConnectedEdgesGeometry();
         }
         else if (resizeMoveMode == ResizeMoveMode.Resizing && resizingMovingNode == this)
         {
@@ -446,28 +505,28 @@ public class NodeController : MonoBehaviour
 
                 switch (resizeStartPointerState)
                 {
-                    case PointerState.TopRight:
+                    case NodePointerState.TopRight:
                         scaleVector = new Vector2(localCurrentCursor.x - localLastCursor.x, localCurrentCursor.y - localLastCursor.y);
                         break;
-                    case PointerState.BottomRight:
+                    case NodePointerState.BottomRight:
                         scaleVector = new Vector2(localCurrentCursor.x - localLastCursor.x, -(localCurrentCursor.y - localLastCursor.y));
                         break;
-                    case PointerState.BottomLeft:
+                    case NodePointerState.BottomLeft:
                         scaleVector = new Vector2(-(localCurrentCursor.x - localLastCursor.x), -(localCurrentCursor.y - localLastCursor.y));
                         break;
-                    case PointerState.TopLeft:
+                    case NodePointerState.TopLeft:
                         scaleVector = new Vector2(-(localCurrentCursor.x - localLastCursor.x), localCurrentCursor.y - localLastCursor.y);
                         break;
-                    case PointerState.Top:
+                    case NodePointerState.Top:
                         scaleVector = new Vector2(0.0F, localCurrentCursor.y - localLastCursor.y);
                         break;
-                    case PointerState.Right:
+                    case NodePointerState.Right:
                         scaleVector = new Vector2(localCurrentCursor.x - localLastCursor.x, 0.0F);
                         break;
-                    case PointerState.Bottom:
+                    case NodePointerState.Bottom:
                         scaleVector = new Vector2(0.0F, -(localCurrentCursor.y - localLastCursor.y));
                         break;
-                    case PointerState.Left:
+                    case NodePointerState.Left:
                         scaleVector = new Vector2(-(localCurrentCursor.x - localLastCursor.x), 0.0F);
                         break;
                 }
@@ -490,22 +549,22 @@ public class NodeController : MonoBehaviour
 
                 switch (resizeStartPointerState)
                 {
-                    case PointerState.TopRight:
-                    case PointerState.Top:
-                    case PointerState.Right:
+                    case NodePointerState.TopRight:
+                    case NodePointerState.Top:
+                    case NodePointerState.Right:
                         translateVector = scaleVector / 2.0F;
                         break;
-                    case PointerState.BottomRight:
-                    case PointerState.Bottom:
+                    case NodePointerState.BottomRight:
+                    case NodePointerState.Bottom:
                         translateVector = scaleVector / 2.0F;
                         translateVector.y = -translateVector.y;
                         break;
-                    case PointerState.BottomLeft:
+                    case NodePointerState.BottomLeft:
                         translateVector = scaleVector / 2.0F;
                         translateVector = -translateVector;
                         break;
-                    case PointerState.TopLeft:
-                    case PointerState.Left:
+                    case NodePointerState.TopLeft:
+                    case NodePointerState.Left:
                         translateVector = scaleVector / 2.0F;
                         translateVector.x = -translateVector.x;
                         break;
@@ -514,32 +573,133 @@ public class NodeController : MonoBehaviour
                 rectTransform.sizeDelta += scaleVector;
                 rectTransform.anchoredPosition += translateVector;
 
-                resizingMovingLastMousePosition += new Vector3((float)(((double)(Input.mousePosition.x - resizingMovingLastMousePosition.x)) * cleanToDirtyRatioScaleX) ,
-                                                               (float)(((double)(Input.mousePosition.y - resizingMovingLastMousePosition.y)) * cleanToDirtyRatioScaleY) ,
+                resizingMovingLastMousePosition += new Vector3((float)(((double)(Input.mousePosition.x - resizingMovingLastMousePosition.x)) * cleanToDirtyRatioScaleX),
+                                                               (float)(((double)(Input.mousePosition.y - resizingMovingLastMousePosition.y)) * cleanToDirtyRatioScaleY),
                                                                (Input.mousePosition.z - resizingMovingLastMousePosition.z));
             }
 
+            UpdateConnectedEdgesGeometry();
+
             //rectTransform.pivot = originalPivot;
+        }
+        else if(!connectMode && resizeMoveMode == ResizeMoveMode.No && (IsSelectedConnectedEdgeThroughPointerState() || IsSelectedConnectedEdgeThroughResizingMoving()))
+        {
+            //if (nodeMouseOver || nodeTextMouseOver)
+            //    return;
+                        
+            //if(eventSystem.currentSelectedGameObject)
+            {
+                if (inputField.interactable == false)
+                    inputField.interactable = true;
+
+                //if (eventSystem.currentSelectedGameObject)
+                //    eventSystem.SetSelectedGameObject(null);
+
+                imageUIComponent.color = backgroundSelectedColor;
+            }
         }
         else
         {
-            inputField.interactable = true;
+            if (connectMode)
+            {
+                if (inputField.interactable == true)
+                    inputField.interactable = false;
+
+                imageUIComponent.color = nodeDefaultBackgroundColor;
+            }
+            else
+            {
+                if (inputField.interactable == false)
+                    inputField.interactable = true;
+            }
         }
 
         //debugText.text += " " + inputField.interactable.ToString();
+    }
+
+    bool IsSelectedConnectedEdgeThroughResizingMoving()
+    {
+        foreach (EdgeController edge in inwardEdges)
+        {
+            if (edge.IsResizingMovingConnectedNode())
+                return true;
+        }
+
+        foreach (EdgeController edge in outwardEdges)
+        {
+            if (edge.IsResizingMovingConnectedNode())
+                return true;
+        }
+
+        return false;
+    }
+
+    bool IsSelectedConnectedEdgeThroughPointerState()
+    {
+        foreach(EdgeController edge in inwardEdges)
+        {
+            if ((edge.edgeState == EdgeController.EdgeState.Stable && edge.pointerState == EdgeController.EdgePointerState.On))
+                return true;
+        }
+
+        foreach (EdgeController edge in outwardEdges)
+        {
+            if ((edge.edgeState == EdgeController.EdgeState.Stable && edge.pointerState == EdgeController.EdgePointerState.On))
+                return true;
+        }
+
+        return false;
+    }
+
+    void UpdateConnectedEdgesGeometry()
+    {
+        foreach (EdgeController edge in outwardEdges)
+            NodesParentController.instance.UpdateStableEdgeGeometry(edge);
+
+        foreach (EdgeController edge in inwardEdges)
+            NodesParentController.instance.UpdateStableEdgeGeometry(edge);
     }
 
     void DeleteNode()
     {
         resizeMoveMode = ResizeMoveMode.No;
         CursorController.instance.ResetCursor();
-        lastPointerState = PointerState.Unvalid;
+        lastPointerState = NodePointerState.Unvalid;
         PreviewController.instance.previewEnabled = false;
         PreviewController.instance.previewNode = null;
 
         DataController.instance.UnregisterNode(nodeID);
 
+        EdgeController[] connectedEdgesArray = new EdgeController[inwardEdges.Count + outwardEdges.Count];
+
+        int i = 0;
+
+        foreach(EdgeController edge in inwardEdges)
+        {
+            connectedEdgesArray[i] = edge;
+            i++;
+        }
+
+        foreach(EdgeController edge in outwardEdges)
+        {
+            connectedEdgesArray[i] = edge;
+            i++;
+        }
+
+        if (i != connectedEdgesArray.Length)
+            throw new UnityException("DeleteNode: connected edges count mismatch");
+
+        for (i = 0; i < connectedEdgesArray.Length; i++)
+            connectedEdgesArray[i].AnnihilateEdge();
+
         Destroy(this.gameObject);
+    }
+
+    public void InitConnectMode()
+    {
+        CursorController.instance.ResetCursor();
+        connectModeFromNode = this;
+        connectMode = true;
     }
 
     public void PotentialLeftClicked(UnityEngine.EventSystems.BaseEventData eventData)
@@ -558,9 +718,7 @@ public class NodeController : MonoBehaviour
                     }
                     else
                     {
-                        CursorController.instance.ResetCursor();
-                        connectModeFromNode = this;
-                        connectMode = true;
+                        InitConnectMode();
 
                         NodesParentController.instance.AddEdge(this);
                     }
