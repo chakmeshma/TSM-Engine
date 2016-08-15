@@ -3,7 +3,15 @@ using System.Collections;
 
 public class HelpController : MonoBehaviour
 {
-    private bool _helpEnabled = true;
+    static private HelpController _instance;
+    static public HelpController instance
+    {
+        get
+        {
+            return _instance;
+        }
+    }
+    private bool _helpEnabled = false;
     public bool helpEnabled
     {
         get
@@ -23,6 +31,11 @@ public class HelpController : MonoBehaviour
     }
     public UnityEngine.UI.Image helpBackground;
     public UnityEngine.UI.Text helpText;
+
+    void Awake()
+    {
+        _instance = this;
+    }
 
     void Update()
     {

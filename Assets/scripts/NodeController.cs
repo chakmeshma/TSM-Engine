@@ -13,7 +13,7 @@ public class NodeController : MonoBehaviour
 
     private int _nodeID = 0;
     private UnityEngine.EventSystems.EventSystem eventSystem;
-    private UnityEngine.UI.Text debugText;
+    //private UnityEngine.UI.Text debugText;
     private UnityEngine.UI.Image imageUIComponent;
     private Color nodeDefaultBackgroundColor;
     private bool _nodeTextMouseOver = false;
@@ -287,6 +287,12 @@ public class NodeController : MonoBehaviour
         ignoreNextPotentialAddEdgeClick = false;
     }
 
+    public void ConnectEdge()
+    {
+        potentialConnectModeToNode = this;
+        NodesParentController.instance.ConfirmEdge();
+    }
+
     void MakeTopMost()
     {
         rectTransform.SetAsLastSibling();
@@ -321,7 +327,7 @@ public class NodeController : MonoBehaviour
         nodesCamera = Camera.main;
         imageUIComponent = GetComponent<UnityEngine.UI.Image>();
         nodeDefaultBackgroundColor = imageUIComponent.color;
-        debugText = GameObject.Find("debug").GetComponent<UnityEngine.UI.Text>();
+        //debugText = GameObject.Find("debug").GetComponent<UnityEngine.UI.Text>();
     }
 
     void Start()

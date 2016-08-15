@@ -22,8 +22,8 @@ public class EdgeController : MonoBehaviour
     private EdgePointerState lastPointerState = EdgePointerState.Unvalid;
     private bool _edgeClicked = false;
 
-    [HideInInspector]
-    public bool forceUpdateSizes = false;
+    static public float lastCalculatedFinalHeadSize = float.NegativeInfinity;
+    static public bool forceUpdateSizes = false;
     [HideInInspector]
     public Vector2 fromNodeAnchoredPosition = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
     [HideInInspector]
@@ -274,6 +274,8 @@ public class EdgeController : MonoBehaviour
             finalHeadSize = Mathf.Clamp(headSize, minHeadSize, maxHeadSize);
         }
 
+        lastCalculatedFinalHeadSize = finalHeadSize;
+
         headRectTransform.sizeDelta = new Vector2(finalHeadSize / parentCanvas.scaleFactor, finalHeadSize / parentCanvas.scaleFactor);
         tailRectTransform.offsetMax = new Vector2((-finalHeadSize + 2.0F) / parentCanvas.scaleFactor, tailRectTransform.offsetMax.y);
 
@@ -319,6 +321,8 @@ public class EdgeController : MonoBehaviour
 
         if (forceUpdateSizes || lastCanvasScaleFactor != parentCanvas.scaleFactor/* || lastToNodeSizeFactor != toNodeSizeFactor*/)
         {
+            NodesParentController.instance.UpdateStableEdgeGeometry(this);
+
             UpdateEdgeSizes();
 
             lastCanvasScaleFactor = parentCanvas.scaleFactor;
@@ -417,6 +421,8 @@ public class EdgeController : MonoBehaviour
 
     public void DeleteEdge()
     {
+        forceUpdateSizes = true;
+
         Destroy(this.gameObject);
     }
 
@@ -442,6 +448,8 @@ public class EdgeController : MonoBehaviour
         {
             if (edgeMouseOver && !NodeController.connectMode && NodeController.resizeMoveMode == NodeController.ResizeMoveMode.No)
             {
+                EdgeController partnerEdge = NodesParentController.instance.FindEdgePartner(this);
+
                 NodeController lastFromNode = fromNode;
                 //NodeController lastToNode = toNode;
                 DisconnectEdge();
@@ -449,6 +457,7 @@ public class EdgeController : MonoBehaviour
                 NodesParentController.instance.EditEdge(lastFromNode, this);
 
                 //lastToNode.UnvalidateLastPointerState(false);
+                NodesParentController.instance.StartUpdateEdgePartner(partnerEdge, 1, false);
             }
         }
     }
@@ -472,6 +481,8 @@ public class EdgeController : MonoBehaviour
         {
             if (edgeMouseOver && !NodeController.connectMode && NodeController.resizeMoveMode == NodeController.ResizeMoveMode.No)
             {
+                EdgeController partnerEdge = NodesParentController.instance.FindEdgePartner(this);
+
                 //NodeController lastFromNode = fromNode;
                 //NodeController lastToNode = toNode;
                 //DisconnectEdge();
@@ -480,6 +491,8 @@ public class EdgeController : MonoBehaviour
                 //lastFromNode.UnvalidateLastPointerState(false);
                 //lastToNode.UnvalidateLastPointerState(false);
                 AnnihilateEdge();
+
+                NodesParentController.instance.StartUpdateEdgePartner(partnerEdge, 1, false);
             }
         }
     }

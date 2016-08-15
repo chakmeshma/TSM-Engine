@@ -11,6 +11,30 @@ public class CameraController : MonoBehaviour
     public float panMultiplier = 2.0F;
     public AnimationCurve zoomCurve;
     public Canvas referenceCanvas;
+    public float zoom
+    {
+        get
+        {
+            return zoomFactor;
+        }
+
+        set
+        {
+            zoomFactor = Mathf.Clamp(value, 0.0F, 1.0F);
+        }
+    }
+    public Vector2 pan
+    {
+        get
+        {
+            return referencePanel.anchoredPosition;
+        }
+
+        set
+        {
+            referencePanel.anchoredPosition = value;
+        }
+    }
 
     private UnityEngine.UI.CanvasScaler canvasScaler;
     private RectTransform referencePanel;

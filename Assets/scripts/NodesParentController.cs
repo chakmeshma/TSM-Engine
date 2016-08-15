@@ -12,6 +12,7 @@ public class NodesParentController : MonoBehaviour
         }
     }
 
+    private Canvas parentCanvas;
     //private UnityEngine.EventSystems.EventSystem eventSystem;
     private bool ignoreNextClick = false;
     private float lastClickTime = Mathf.NegativeInfinity;
@@ -21,6 +22,7 @@ public class NodesParentController : MonoBehaviour
     private EdgeController lastEdgeController;
     private NodeController lastFromNodeController;
     private NodeController lastToNodeController;
+    private EdgeController lastPartnerEdge = null;
     //private NodeController lastPotentialConnectModeToNode = null;
 
     public Camera nodesCamera
@@ -44,6 +46,7 @@ public class NodesParentController : MonoBehaviour
     {
         //eventSystem = UnityEngine.EventSystems.EventSystem.current;
         _rectTransform = GetComponent<RectTransform>();
+        parentCanvas = rectTransform.GetComponentInParent<Canvas>();
         edgesParent = _rectTransform.Find("Edges").GetComponent<RectTransform>();
         _nodesCamera = Camera.main;
 
@@ -101,11 +104,11 @@ public class NodesParentController : MonoBehaviour
         }
     }
 
-    GameObject AddNode()
+    public GameObject AddNode(int forceID = 0)
     {
         GameObject node = Instantiate(nodePrefab, transform, false) as GameObject;
 
-        DataController.instance.RegisterNode(node.GetComponent<NodeController>());
+        DataController.instance.RegisterNode(node.GetComponent<NodeController>(), forceID);
 
         return node;
     }
@@ -143,15 +146,9 @@ public class NodesParentController : MonoBehaviour
 
         bool twoWay = false;
 
-        foreach (EdgeController edge2 in toNode.outwardEdges)
-        {
-            if (edge2.toNode == fromNode)
-            {
-                partnerEdge = edge2;
-                twoWay = true;
-                break;
-            }
-        }
+        partnerEdge = FindEdgePartner(edge);
+
+        if (partnerEdge) twoWay = true;
 
         Vector2 fromNodeAnchoredPosition = fromNode.rectTransform.anchoredPosition;
         Vector2 toNodeAnchoredPosition = toNode.rectTransform.anchoredPosition;
@@ -161,8 +158,19 @@ public class NodesParentController : MonoBehaviour
 
         if (twoWay)
         {
+            float fromNodeMinRadius = Mathf.Min(fromNode.rectTransform.sizeDelta.x / 2.0F, fromNode.rectTransform.sizeDelta.y / 2.0F);
+            float toNodeMinRadius = Mathf.Min(toNode.rectTransform.sizeDelta.x / 2.0F, toNode.rectTransform.sizeDelta.y / 2.0F);
+
+            float smallerHeadNodeRadius = Mathf.Min(fromNodeMinRadius, toNodeMinRadius);
+
             Vector2 twoWayEdgeEndsOffet = Quaternion.Euler(0.0F, 0.0F, 90.0F) * reverseEdgeVector;
-            twoWayEdgeEndsOffet *= (float)(((double)edge.headSize) /  ((double)twoWayEdgeEndsOffet.magnitude));
+
+            float appliedHeadSize = edge.headSize;
+
+            if (EdgeController.lastCalculatedFinalHeadSize > 0.0F)
+                appliedHeadSize = EdgeController.lastCalculatedFinalHeadSize;
+
+            twoWayEdgeEndsOffet *= (float)((((double)Mathf.Min(smallerHeadNodeRadius - 10.0F, (appliedHeadSize / 2.0F) / parentCanvas.scaleFactor))) /  ((double)twoWayEdgeEndsOffet.magnitude));
 
             fromNodeAnchoredPosition += twoWayEdgeEndsOffet;
             toNodeAnchoredPosition += twoWayEdgeEndsOffet;
@@ -204,21 +212,68 @@ public class NodesParentController : MonoBehaviour
             edge.rectTransform.sizeDelta = new Vector2(finalEdgeVector.magnitude, edge.rectTransform.sizeDelta.y);
         }
 
-        edge.forceUpdateSizes = true;
+        //edge.forceUpdateSizes = true;
 
         StopAllCoroutines();
 
         if (stackDepth == 0)
         {
-            StartCoroutine(UpdatePartnerEdge(partnerEdge, stackDepth + 1));
+            StartUpdateEdgePartner(partnerEdge, stackDepth + 1, false);
         }
     }
 
-    IEnumerator UpdatePartnerEdge(EdgeController partnerEdge, int stackDepth)
+    IEnumerator UpdateEdgePartner(EdgeController edge, int stackDepth, bool findPartnerAnew = false/*, bool waitForConnectMode = false*/)
     {
-        yield return new WaitForEndOfFrame();
+        //if (!waitForConnectMode)
+        yield return 0;
 
-        UpdateStableEdgeGeometry(partnerEdge, stackDepth);
+        EdgeController partnerEdge = null;
+
+        if (findPartnerAnew)
+        {
+            partnerEdge = FindEdgePartner(edge);
+        }
+
+        if (findPartnerAnew)
+        {
+            if (partnerEdge)
+                UpdateStableEdgeGeometry(partnerEdge, stackDepth);
+        }
+        else
+        {
+            if(edge)
+                UpdateStableEdgeGeometry(edge, stackDepth);
+        }
+
+        //if(waitForConnectMode)
+        //    yield return new WaitUntil(() => NodeController.connectMode == true );
+
+        //EdgeController.forceUpdateSizes = true;
+    }
+
+    public EdgeController FindEdgePartner(EdgeController edge)
+    {
+        EdgeController partnerEdge = null;
+
+        try
+        {
+            foreach (EdgeController edge2 in edge.toNode.outwardEdges)
+            {
+                if (edge2.toNode == edge.fromNode)
+                {
+                    partnerEdge = edge2;
+                    if (partnerEdge)
+                        lastPartnerEdge = partnerEdge;
+                    break;
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            print(e.Message);
+        }
+
+        return partnerEdge;
     }
 
     public bool ConfirmEdge()
@@ -229,6 +284,7 @@ public class NodesParentController : MonoBehaviour
         lastEdgeController.ConfirmEdge(fromNode, toNode);
         lastEdgeController.rectTransform.SetParent(edgesParent);
 
+        //if(!DataController.insta)
         UpdateStableEdgeGeometry(lastEdgeController);
 
         fromNode.outwardEdges.Add(lastEdgeController);
@@ -237,6 +293,12 @@ public class NodesParentController : MonoBehaviour
         CancelEdge(false);
 
         return true;
+    }
+
+    public void StartUpdateEdgePartner(EdgeController edge, int stackDepth, bool findPartnerAnew = false)
+    {
+        StopAllCoroutines();
+        StartCoroutine(UpdateEdgePartner(edge, stackDepth, findPartnerAnew));
     }
 
     public GameObject EditEdge(NodeController fromNodeController, EdgeController edgeController)
@@ -249,7 +311,7 @@ public class NodesParentController : MonoBehaviour
         lastFromNodeController = fromNodeController;
 
         lastEdgeController.rectTransform.anchoredPosition = lastFromNodeController.rectTransform.anchoredPosition;
-
+        
         return edge;
     }
 
